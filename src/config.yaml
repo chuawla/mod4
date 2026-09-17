@@ -1,0 +1,11 @@
+data:
+  raw_path: "./data/classification_bonus_practice_data.csv"
+
+target:
+  classification_col: "Survive"
+  regression_col: "target_value"
+
+model:
+  test_size: 0.2
+  random_state: 42
+  rf_n_estimators: 100
