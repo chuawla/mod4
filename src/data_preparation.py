@@ -1,51 +1,54 @@
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
-def load_and_optimize_data(file_path: str) -> pd.DataFrame:
+def load_and_validate_data(file_path: str) -> pd.DataFrame:
+    """Loads CSV data, strips columns, and performs basic schema validation."""
     df = pd.read_csv(file_path)
     df.columns = df.columns.str.strip()
     
-    # Clean Age
-    if 'Age' in df.columns:
-        df = df[df['Age'] > 0]
-        
-    # Map Survive target
+    # Assertions / Schema Checks
+    required_cols = ['Survive', 'Age', 'Creatinine', 'Ejection Fraction']
+    for col in required_cols:
+        assert col in df.columns, f"Missing critical column: {col}"
+    
+    # Clean raw target & invalid ages
+    df = df[df['Age'] > 0]
     survive_map = {'1': 1, '1.0': 1, 'yes': 1, 'true': 1, '0': 0, '0.0': 0, 'no': 0, 'false': 0}
-    if 'Survive' in df.columns:
-        df['Survive'] = df['Survive'].astype(str).str.strip().str.lower().map(survive_map)
-
-    # Clean Ejection Fraction
+    df['Survive'] = df['Survive'].astype(str).str.strip().str.lower().map(survive_map)
+    
+    # Clean numeric columns stored as strings
     if 'Ejection Fraction' in df.columns and df['Ejection Fraction'].dtype == 'O':
         df['Ejection Fraction'] = pd.to_numeric(
-            df['Ejection Fraction'].astype(str).str.replace('%', '').str.strip(), 
-            errors='coerce'
+            df['Ejection Fraction'].astype(str).str.replace('%', '').str.strip(), errors='coerce'
         )
-
-    # Clean Binary Strings
-    binary_map = {'yes': 1, 'no': 0, '1': 1, '0': 0, 'male': 1, 'm': 1, 'female': 0, 'f': 0}
-    for col in ['Smoke', 'Diabetes', 'Gender']:
-        if col in df.columns and df[col].dtype == 'O':
-            df[col] = df[col].astype(str).str.strip().str.lower().map(binary_map)
-
-    # Impute missing Creatinine
-    if 'Creatinine' in df.columns:
-        imputer = SimpleImputer(strategy='median')
-        df['Creatinine'] = imputer.fit_transform(df[['Creatinine']])
-
-    # Drop unused columns
+        
     df = df.drop(columns=['ID', 'Favorite color'], errors='ignore')
-
-    # Downcast floats and ints to save RAM
-    for col in df.select_dtypes(include=['float64']).columns:
-        df[col] = df[col].astype(np.float32)
-    for col in df.select_dtypes(include=['int64']).columns:
-        df[col] = df[col].astype(np.int16)
-
     return df
 
-def split_features_and_target(df: pd.DataFrame, target_col: str, test_size: float = 0.2, random_state: int = 42):
+def build_preprocessor(numeric_features: list, categorical_features: list) -> ColumnTransformer:
+    """Creates a ColumnTransformer to prevent data leakage during train/test splits."""
+    num_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler())
+    ])
+    
+    cat_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('encoder', OneHotEncoder(handle_unknown='ignore', drop='first'))
+    ])
+    
+    return ColumnTransformer([
+        ('num', num_pipeline, numeric_features),
+        ('cat', cat_pipeline, categorical_features)
+    ])
+
+def split_data(df: pd.DataFrame, target_col: str, test_size=0.2, random_state=42):
+    """Performs Stratified Train-Test Split to preserve class proportions."""
     X = df.drop(columns=[target_col])
     y = df[target_col]
-    return train_test_split(X, y, test_size=test_size, random_state=random_state)
+    return train_test_split(X, y, test_size=test_size, stratify=y, random_state=random_state)
